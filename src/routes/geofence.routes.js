@@ -4,13 +4,20 @@ export async function geofenceRoutes(app) {
   app.post('/check', {
     schema: {
       tags: ['Geofences'],
-      summary: 'Valida una coordenada contra las geocercas',
+      summary: 'Consulta el negocio por DPI y valida sus coordenadas contra su departamento',
       body: {
         type: 'object',
-        required: ['shapeISO', 'lat', 'lot'],
+        required: ['identificador', 'lat', 'lot'],
         additionalProperties: false,
         properties: {
-          shapeISO: { type: 'string', minLength: 1, description: 'Codigo ISO del departamento, por ejemplo GT-GU.' },
+          identificador: {
+            type: 'string',
+            minLength: 13,
+            maxLength: 13,
+            pattern: '^[0-9]{13}$',
+            description: 'DPI del comercio, como una cadena de 13 digitos.',
+            examples: ['0123456789012']
+          },
           lat: { type: 'number', minimum: -90, maximum: 90, description: 'Latitud en grados decimales.' },
           lot: { type: 'number', minimum: -180, maximum: 180, description: 'Longitud en grados decimales.' }
         }
@@ -18,8 +25,11 @@ export async function geofenceRoutes(app) {
       response: {
         200: {
           type: 'object',
-          required: ['shapeName', 'shapeISO', 'inside', 'distance'],
+          required: ['NOMNEG', 'DEPNEG', 'DPI', 'shapeName', 'shapeISO', 'inside', 'distance'],
           properties: {
+            NOMNEG: { type: 'string', nullable: true, description: 'Nombre del negocio registrado.' },
+            DEPNEG: { type: 'integer', description: 'Identificador del departamento del negocio.' },
+            DPI: { type: 'string', description: 'DPI del negocio consultado.' },
             shapeName: { type: 'string' },
             shapeISO: { type: 'string' },
             inside: { type: 'boolean' },
@@ -35,9 +45,11 @@ export async function geofenceRoutes(app) {
         },
         404: {
           type: 'object',
+          description: 'No se encontró el negocio o su DEPNEG no tiene un departamento asociado.',
+          required: ['error', 'identificador'],
           properties: {
             error: { type: 'string' },
-            shapeISO: { type: 'string' }
+            identificador: { type: 'string' }
           }
         }
       }

@@ -2,9 +2,14 @@ import Fastify from 'fastify';
 import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { geofenceRoutes } from './routes/geofence.routes.js';
+import { sqlServer } from './config/sql-server.js';
 
 export function buildApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true });
+  const database = options.database ?? sqlServer;
+
+  app.decorate('database', database);
+  app.addHook('onClose', async () => database.close());
 
   app.register(swagger, {
     openapi: {

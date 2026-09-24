@@ -11,13 +11,15 @@ export async function checkLocation(request, reply) {
     });
   }
 
-  const { shapeISO, lat, lot } = result.data;
-  const location = findGeofenceLocation(shapeISO, lat, lot);
+  const { identificador, lat, lot } = result.data;
+  const location = await findGeofenceLocation(identificador, lat, lot, {
+    database: request.server.database
+  });
 
   if (!location) {
     return reply.status(404).send({
-      error: 'Geofence not found',
-      shapeISO
+      error: 'No se encontró el negocio',
+      identificador
     });
   }
 

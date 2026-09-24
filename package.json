@@ -8,6 +8,7 @@
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
+    "db:setup:postgres": "node scripts/setup-postgres.js",
     "test": "node --test",
     "test:watch": "node --test --watch"
   },
@@ -27,6 +28,7 @@
     "dotenv": "^17.4.2",
     "fastify": "^5.12.1",
     "mssql": "^12.7.2",
+    "pg": "^8.23.0",
     "zod": "^4.5.4"
   }
 }

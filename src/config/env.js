@@ -61,3 +61,48 @@ export function getSqlServerConfig(source = process.env) {
     }
   };
 }
+
+const postgresEnvSchema = z.object({
+  PG_HOST: z.string().trim().min(1),
+  PG_PORT: z.coerce.number().int().min(1).max(65535).default(5432),
+  PG_DATABASE: z.string().trim().min(1),
+  PG_USER: z.string().trim().min(1),
+  PG_PASSWORD: z.string().min(1),
+  PG_SSL: boolean('true'),
+  PG_SSL_REJECT_UNAUTHORIZED: boolean('true'),
+  PG_POOL_MAX: z.coerce.number().int().min(1).default(5),
+  PG_CONNECTION_TIMEOUT_MS: timeout(5000),
+  PG_QUERY_TIMEOUT_MS: timeout(10000),
+  PG_POOL_IDLE_TIMEOUT_MS: timeout(30000)
+});
+
+export function getPostgresConfig(source = process.env) {
+  const result = postgresEnvSchema.safeParse(source);
+  if (!result.success) {
+    const fields = [...new Set(result.error.issues.map((issue) => issue.path.join('.')))];
+    throw new Error(`Configuracion de PostgreSQL invalida. Revisa: ${fields.join(', ')}.`);
+  }
+
+  const config = result.data;
+  return {
+    host: config.PG_HOST,
+    port: config.PG_PORT,
+    database: config.PG_DATABASE,
+    user: config.PG_USER,
+    password: config.PG_PASSWORD,
+    ssl: config.PG_SSL ? { rejectUnauthorized: config.PG_SSL_REJECT_UNAUTHORIZED } : false,
+    max: config.PG_POOL_MAX,
+    connectionTimeoutMillis: config.PG_CONNECTION_TIMEOUT_MS,
+    idleTimeoutMillis: config.PG_POOL_IDLE_TIMEOUT_MS,
+    query_timeout: config.PG_QUERY_TIMEOUT_MS,
+    statement_timeout: config.PG_QUERY_TIMEOUT_MS
+  };
+}
+
+export function getPostgresMaxPending(source = process.env) {
+  const result = z.coerce.number().int().min(1).default(100).safeParse(source.PG_MAX_PENDING);
+  if (!result.success) {
+    throw new Error('Configuracion de PostgreSQL invalida. Revisa: PG_MAX_PENDING.');
+  }
+  return result.data;
+}

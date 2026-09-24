@@ -18,6 +18,16 @@ La documentacion interactiva de Swagger esta disponible en `http://localhost:300
 
 `POST /api/v1/geofences/check`
 
+Headers obligatorios:
+
+```http
+x-api-key: valor_de_API_KEY_en_el_env
+x-user: usuario-que-realiza-la-consulta
+Content-Type: application/json
+```
+
+La clave se configura con `API_KEY` en `.env`. Una clave ausente o incorrecta devuelve HTTP `401`. `x-user` debe contener entre 1 y 128 caracteres; si falta, devuelve HTTP `400`. Si el servidor no tiene `API_KEY` configurada, devuelve HTTP `503`. Swagger permite ingresar la clave mediante **Authorize** y el usuario en los parametros del endpoint. `/health` y `/docs` siguen disponibles sin clave.
+
 ```json
 {
   "identificador": "0123456789012",
@@ -97,11 +107,49 @@ Si ejecutas varios procesos o replicas, cada uno tendra su propio limite `SQL_PO
 
 Las pruebas de concurrencia usan conexiones simuladas y no requieren una base de datos real. La consulta contra `GEPROD` debe verificarse en el entorno con sus credenciales y permisos.
 
+## Auditoria en PostgreSQL
+
+Cada solicitud al endpoint de geocerca registra en `public.geofence_audit_logs`:
+
+- Identificador de solicitud, fecha, metodo y ruta.
+- Usuario recibido en `x-user`.
+- Cuerpo recibido antes de las transformaciones de validacion.
+- Cuerpo de la respuesta enviada y codigo HTTP.
+
+Incluye respuestas correctas, negocios no encontrados, rechazos de autenticacion, errores de validacion y fallas de SQL Server. El header `x-api-key` no se guarda. Si la solicitud no contiene un cuerpo JSON valido, el cuerpo recibido queda como `null`.
+
+Configura `PG_HOST`, `PG_PORT`, `PG_DATABASE`, `PG_USER` y `PG_PASSWORD` en `.env`. Usa `PG_SSL=true` para TLS; `PG_SSL_REJECT_UNAUTHORIZED=true` verifica el certificado. Para un servidor que no ofrece TLS, configura `PG_SSL=false`.
+
+Prepara la tabla una vez, con la configuracion de PostgreSQL completa:
+
+```bash
+pnpm db:setup:postgres
+```
+
+El comando ejecuta `sql/postgres-geofence-audit.sql`. La API no crea tablas al iniciar. La cuenta que ejecuta este comando necesita permiso para crearlas; la cuenta usada por la API necesita permiso de insercion en la tabla y uso de su secuencia de identidad.
+
+La auditoria se encola en `onResponse`, despues de enviar la respuesta HTTP. PostgreSQL usa un pool independiente de SQL Server. Los errores de conexion, consulta, configuracion o auditoria se registran y no cambian la respuesta de geocerca.
+
+| Variable | Valor inicial | Funcion |
+| --- | --- | --- |
+| `PG_POOL_MAX` | `5` | Maximo de conexiones PostgreSQL por proceso. |
+| `PG_CONNECTION_TIMEOUT_MS` | `5000` | Limite para conectar u obtener una conexion disponible. |
+| `PG_QUERY_TIMEOUT_MS` | `10000` | Tiempo limite de consulta en el cliente y en PostgreSQL. |
+| `PG_POOL_IDLE_TIMEOUT_MS` | `30000` | Tiempo de inactividad antes de liberar conexiones. |
+| `PG_MAX_PENDING` | `100` | Maximo de trabajos pendientes, incluyendo consultas en ejecucion. |
+
+Si se alcanza `PG_MAX_PENDING`, el trabajo nuevo se descarta y se registra `PG_QUEUE_FULL`; la peticion HTTP sigue su curso. La cola esta en memoria: no garantiza conservar registros ante un cierre abrupto del proceso y no reintenta escrituras fallidas. Durante un cierre normal, la API espera los trabajos aceptados y cierra ambos pools.
+
+La funcion reutilizable `sendPostgresQuery(text, values)` esta en `src/services/postgres-background.service.js`. Se llama sin `await` y usa parametros PostgreSQL (`$1`, `$2`, etc.). Devuelve `true` si acepto el trabajo o `false` si no pudo encolarlo; ese valor no confirma que se haya guardado en la base de datos.
+
 ## Estructura
 
 - `src/config`: configuracion, variables de entorno y listado GeoJSON de geocercas.
 - `src/controllers`: entrada HTTP y respuestas.
+- `src/hooks`: validacion de API key y captura de auditoria.
 - `src/routes`: registro de endpoints.
 - `src/schemas`: validacion de payloads.
 - `src/services`: logica de negocio geoespacial.
 - `tests`: pruebas de integracion usando `fastify.inject`.
+- `sql`: definicion de la tabla de auditoria PostgreSQL.
+- `scripts`: preparacion de la base de datos.

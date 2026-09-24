@@ -1,10 +1,23 @@
 import { checkLocation } from '../controllers/geofence.controller.js';
+import { validateApiKey } from '../hooks/api-key.js';
+import { registerGeofenceAuditHooks } from '../hooks/geofence-audit.js';
 
 export async function geofenceRoutes(app) {
+  registerGeofenceAuditHooks(app);
+
   app.post('/check', {
+    preValidation: validateApiKey,
     schema: {
       tags: ['Geofences'],
+      security: [{ ApiKeyAuth: [] }],
       summary: 'Consulta el negocio por DPI y valida sus coordenadas contra su departamento',
+      headers: {
+        type: 'object',
+        required: ['x-user'],
+        properties: {
+          'x-user': { type: 'string', minLength: 1, maxLength: 128, description: 'Usuario que realiza la consulta.' }
+        }
+      },
       body: {
         type: 'object',
         required: ['identificador', 'lat', 'lot'],
@@ -51,6 +64,14 @@ export async function geofenceRoutes(app) {
             error: { type: 'string' },
             identificador: { type: 'string' }
           }
+        },
+        401: {
+          type: 'object',
+          properties: { error: { type: 'string' } }
+        },
+        503: {
+          type: 'object',
+          properties: { error: { type: 'string' } }
         }
       }
     }

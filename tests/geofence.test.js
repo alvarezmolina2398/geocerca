@@ -4,6 +4,9 @@ import { buildApp } from '../src/app.js';
 
 const identificador = '0123456789012';
 const negocio = { NOMNEG: 'Tienda de prueba', DEPNEG: 7, DPI: identificador };
+const apiKey = 'test-api-key';
+const headers = { 'x-api-key': apiKey, 'x-user': 'usuario-prueba' };
+const audit = { record: () => true, close: async () => {} };
 
 function createDatabase(findBusiness) {
   const pool = {
@@ -25,12 +28,12 @@ function createDatabase(findBusiness) {
 }
 
 function createTestApp(t, findBusiness) {
-  const app = buildApp({ logger: false, database: createDatabase(findBusiness) });
+  const app = buildApp({ logger: false, database: createDatabase(findBusiness), apiKey, audit });
   t.after(() => app.close());
   return app;
 }
 
-const app = buildApp({ logger: false, database: createDatabase(async () => negocio) });
+const app = buildApp({ logger: false, database: createDatabase(async () => negocio), apiKey, audit });
 
 test.after(async () => app.close());
 
@@ -61,6 +64,7 @@ test('queries the requested DPI and returns the business with its geofence resul
   const response = await testApp.inject({
     method: 'POST',
     url: '/api/v1/geofences/check',
+    headers,
     payload: { identificador, lat: 14.6349, lot: -90.5069 }
   });
 
@@ -83,6 +87,7 @@ test('uses DEPNEG instead of a fixed department and accepts padded numeric text'
   const response = await testApp.inject({
     method: 'POST',
     url: '/api/v1/geofences/check',
+    headers,
     payload: { identificador, lat: 14.6349, lot: -90.5069 }
   });
 
@@ -98,6 +103,7 @@ test('returns business not found when the SQL query has no rows', async (t) => {
   const response = await testApp.inject({
     method: 'POST',
     url: '/api/v1/geofences/check',
+    headers,
     payload: { identificador, lat: 14.6349, lot: -90.5069 }
   });
 
@@ -112,6 +118,7 @@ test('returns business not found for missing or unknown DEPNEG', async (t) => {
       const response = await testApp.inject({
         method: 'POST',
         url: '/api/v1/geofences/check',
+        headers,
         payload: { identificador, lat: 14.6349, lot: -90.5069 }
       });
 
@@ -133,6 +140,7 @@ test('keeps simultaneous business lookups and department results separate', asyn
   const responses = await Promise.all([...businesses.keys()].map((dpi) => testApp.inject({
     method: 'POST',
     url: '/api/v1/geofences/check',
+    headers,
     payload: { identificador: dpi, lat: 14.6349, lot: -90.5069 }
   })));
 
@@ -151,6 +159,7 @@ test('returns a server error when SQL fails instead of reporting a missing busin
   const response = await testApp.inject({
     method: 'POST',
     url: '/api/v1/geofences/check',
+    headers,
     payload: { identificador, lat: 14.6349, lot: -90.5069 }
   });
 
@@ -162,6 +171,7 @@ test('reports a location outside the geofence', async () => {
   const response = await app.inject({
     method: 'POST',
     url: '/api/v1/geofences/check',
+    headers,
     payload: { identificador, lat: 19.43, lot: -99.13 }
   });
 
@@ -173,6 +183,7 @@ test('rejects invalid coordinates', async () => {
   const response = await app.inject({
     method: 'POST',
     url: '/api/v1/geofences/check',
+    headers,
     payload: { identificador, lat: 95, lot: -90.5 }
   });
 
@@ -184,6 +195,7 @@ test('requires the commerce DPI', async () => {
   const response = await app.inject({
     method: 'POST',
     url: '/api/v1/geofences/check',
+    headers,
     payload: { lat: 14.6349, lot: -90.5069 }
   });
 
@@ -197,6 +209,7 @@ test('rejects a DPI without exactly 13 digits', async (t) => {
       const response = await app.inject({
         method: 'POST',
         url: '/api/v1/geofences/check',
+        headers,
         payload: { identificador: invalidDpi, lat: 14.6349, lot: -90.5069 }
       });
 

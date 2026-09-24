@@ -3,13 +3,24 @@ import swagger from '@fastify/swagger';
 import swaggerUi from '@fastify/swagger-ui';
 import { geofenceRoutes } from './routes/geofence.routes.js';
 import { sqlServer } from './config/sql-server.js';
+import { geofenceAudit } from './services/geofence-audit.service.js';
 
 export function buildApp(options = {}) {
   const app = Fastify({ logger: options.logger ?? true });
   const database = options.database ?? sqlServer;
+  const audit = options.audit ?? geofenceAudit;
 
   app.decorate('database', database);
-  app.addHook('onClose', async () => database.close());
+  app.decorate('audit', audit);
+  app.decorate('apiKey', options.apiKey ?? process.env.API_KEY ?? '');
+  app.addHook('onClose', async () => {
+    await Promise.all([
+      database.close(),
+      Promise.resolve().then(() => audit.close()).catch((error) => {
+        app.log.error({ code: error?.code ?? 'AUDIT_ERROR' }, 'No se pudo cerrar la auditoria.');
+      })
+    ]);
+  });
 
   app.register(swagger, {
     openapi: {
@@ -19,6 +30,11 @@ export function buildApp(options = {}) {
         version: '1.0.0'
       },
       servers: [{ url: 'http://localhost:3000' }],
+      components: {
+        securitySchemes: {
+          ApiKeyAuth: { type: 'apiKey', in: 'header', name: 'x-api-key' }
+        }
+      },
       tags: [{ name: 'System', description: 'Estado de la API' }, { name: 'Geofences', description: 'Validacion de geocercas' }]
     }
   });

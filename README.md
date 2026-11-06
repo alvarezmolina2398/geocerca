@@ -69,6 +69,42 @@ Una falla de conexion o de consulta devuelve HTTP `500`. Un negocio existente co
 
 Las coordenadas se validan con latitud entre `-90` y `90`, y longitud entre `-180` y `180`. El listado de los 22 departamentos de Guatemala se encuentra en `src/config/geofences.json` como un `FeatureCollection` GeoJSON. Cada `Feature` contiene el nombre del departamento y una geometria `Polygon` o `MultiPolygon`.
 
+## Validar coordenadas guardadas en documentos
+
+`POST /api/v1/geofences/check-documents` recibe el DPI del comercio y una coordenada de referencia. Consulta los documentos enlazados con `INFONEG` y usa el departamento donde cae la coordenada enviada para validar cada ubicación guardada:
+
+```json
+{
+  "identificador": "0123456789012",
+  "lat": 14.6349,
+  "lot": -90.5069
+}
+```
+
+Usa los mismos headers, API key y auditoria que `/check`. Para cada fila de `DOCUMENTOS`, compara `LATITUD` y `LONGITUD` contra el poligono del departamento donde caen `lat` y `lot`. La respuesta incluye el departamento de referencia y todos los documentos encontrados; cada uno informa sus coordenadas, `inside` y distancia minima al limite de ese departamento en kilometros:
+
+```json
+{
+  "NOMNEG": "Tienda de ejemplo",
+  "DEPNEG": 7,
+  "DPI": "0123456789012",
+  "lat": 14.6349,
+  "lot": -90.5069,
+  "shapeName": "Guatemala",
+  "shapeISO": "GT-GU",
+  "documents": [
+    {
+      "LATITUD": 14.6349,
+      "LONGITUD": -90.5069,
+      "inside": true,
+      "distance": 1.234
+    }
+  ]
+}
+```
+
+Si no hay documentos para el DPI o la coordenada de referencia cae fuera de Guatemala, devuelve HTTP `404`. Coordenadas faltantes o fuera de rango en los datos almacenados generan HTTP `500` y quedan registradas por el manejador de errores.
+
 Los limites provienen de [geoBoundaries](https://www.geoboundaries.org/), con datos de OpenStreetMap y licencia Open Data Commons Open Database License 1.0.
 
 ## Consulta de comercios en SQL Server

@@ -3,12 +3,12 @@ import assert from 'node:assert/strict';
 import { buildApp } from '../src/app.js';
 
 const identificador = '0123456789012';
-const negocio = { NOMNEG: 'Tienda de prueba', DEPNEG: 7, DPI: identificador };
+const negocio = { NOMNEG: 'Tienda de prueba', DEPNEG: 5, DPI: identificador };
 const apiKey = 'test-api-key';
 const headers = { 'x-api-key': apiKey, 'x-user': 'usuario-prueba' };
 const audit = { record: () => true, close: async () => {} };
 
-function createDatabase(findBusiness) {
+function createDatabase(findBusiness, findDocuments = findBusiness) {
   const pool = {
     request() {
       const parameters = {};
@@ -17,9 +17,11 @@ function createDatabase(findBusiness) {
           parameters[name] = value;
           return this;
         },
-        async query() {
-          const negocio = await findBusiness(parameters.dpi);
-          return { recordset: negocio ? [negocio] : [] };
+        async query(text) {
+          const result = await (text.includes('LATITUD')
+            ? findDocuments(parameters.dpi)
+            : findBusiness(parameters.dpi));
+          return { recordset: Array.isArray(result) ? result : result ? [result] : [] };
         }
       };
     }
@@ -27,8 +29,8 @@ function createDatabase(findBusiness) {
   return { getPool: async () => pool, close: async () => {} };
 }
 
-function createTestApp(t, findBusiness) {
-  const app = buildApp({ logger: false, database: createDatabase(findBusiness), apiKey, audit });
+function createTestApp(t, findBusiness, findDocuments = findBusiness) {
+  const app = buildApp({ logger: false, database: createDatabase(findBusiness, findDocuments), apiKey, audit });
   t.after(() => app.close());
   return app;
 }
@@ -46,6 +48,7 @@ test('exposes the OpenAPI specification', async () => {
   assert.equal(response.statusCode, 200);
   assert.equal(response.json().openapi, '3.0.3');
   assert.ok(response.json().paths['/api/v1/geofences/check']);
+  assert.ok(response.json().paths['/api/v1/geofences/check-documents']);
   const bodySchema = response.json().paths['/api/v1/geofences/check'].post.requestBody.content['application/json'].schema;
   assert.deepEqual(bodySchema.required, ['identificador', 'lat', 'lot']);
   assert.deepEqual(Object.keys(bodySchema.properties), ['identificador', 'lat', 'lot']);
@@ -56,6 +59,104 @@ test('exposes the OpenAPI specification', async () => {
   for (const field of ['NOMNEG', 'DEPNEG', 'DPI']) {
     assert.ok(responseSchema.required.includes(field));
   }
+  const documentsSchema = response.json().paths['/api/v1/geofences/check-documents'].post.requestBody.content['application/json'].schema;
+  assert.deepEqual(documentsSchema.required, ['identificador', 'lat', 'lot']);
+});
+
+test('validates all document coordinates against the department of the submitted location', async (t) => {
+  const documents = [
+    { ...negocio, DEPNEG: 1, LATITUD: 14.6349, LONGITUD: -90.5069 },
+    { ...negocio, DEPNEG: 1, LATITUD: 15.0, LONGITUD: -91.0 }
+  ];
+  const findDocuments = t.mock.fn(async () => documents);
+  const testApp = createTestApp(t, async () => negocio, findDocuments);
+  const response = await testApp.inject({
+    method: 'POST',
+    url: '/api/v1/geofences/check-documents',
+    headers,
+    payload: { identificador, lat: 14.6349, lot: -90.5069 }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(findDocuments.mock.callCount(), 1);
+  assert.deepEqual(findDocuments.mock.calls[0].arguments, [identificador]);
+  const result = response.json();
+  assert.deepEqual({ NOMNEG: result.NOMNEG, DEPNEG: result.DEPNEG, DPI: result.DPI }, {
+    NOMNEG: negocio.NOMNEG,
+    DEPNEG: 5,
+    DPI: negocio.DPI
+  });
+  assert.equal(result.lat, 14.6349);
+  assert.equal(result.lot, -90.5069);
+  assert.equal(result.shapeISO, 'GT-GU');
+  assert.deepEqual(result.documents.map(({ LATITUD, LONGITUD, inside }) => ({
+    LATITUD, LONGITUD, inside
+  })), [
+    { LATITUD: 14.6349, LONGITUD: -90.5069, inside: true },
+    { LATITUD: 15, LONGITUD: -91, inside: false }
+  ]);
+  assert.ok(result.documents.every(({ distance }) => typeof distance === 'number' && distance >= 0));
+});
+
+test('reports invalid stored document coordinates as a server error', async (t) => {
+  const testApp = createTestApp(t, async () => negocio, async () => [{
+    ...negocio,
+    LATITUD: null,
+    LONGITUD: -90.5069
+  }]);
+  const response = await testApp.inject({
+    method: 'POST',
+    url: '/api/v1/geofences/check-documents',
+    headers,
+    payload: { identificador, lat: 14.6349, lot: -90.5069 }
+  });
+
+  assert.equal(response.statusCode, 500);
+  assert.deepEqual(response.json(), { error: 'Internal Server Error' });
+});
+
+test('requires a valid DPI for document location checks', async () => {
+  const response = await app.inject({
+    method: 'POST',
+    url: '/api/v1/geofences/check-documents',
+    headers,
+    payload: { identificador: 'invalid', lat: 14.6349, lot: -90.5069 }
+  });
+
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error, 'Invalid request');
+});
+
+test('returns not found when no documents match the DPI', async (t) => {
+  const testApp = createTestApp(t, async () => negocio, async () => []);
+  const response = await testApp.inject({
+    method: 'POST',
+    url: '/api/v1/geofences/check-documents',
+    headers,
+    payload: { identificador, lat: 14.6349, lot: -90.5069 }
+  });
+
+  assert.equal(response.statusCode, 404);
+  assert.deepEqual(response.json(), {
+    error: 'No se encontraron documentos o las coordenadas enviadas no pertenecen a un departamento de Guatemala.',
+    identificador
+  });
+});
+
+test('returns not found when reference coordinates are outside Guatemala', async (t) => {
+  const testApp = createTestApp(t, async () => negocio, async () => [{
+    ...negocio,
+    LATITUD: 14.6349,
+    LONGITUD: -90.5069
+  }]);
+  const response = await testApp.inject({
+    method: 'POST',
+    url: '/api/v1/geofences/check-documents',
+    headers,
+    payload: { identificador, lat: 19.43, lot: -99.13 }
+  });
+
+  assert.equal(response.statusCode, 404);
 });
 
 test('queries the requested DPI and returns the business with its geofence result', async (t) => {

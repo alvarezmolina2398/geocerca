@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { findCommerceByDpi } from '../src/services/commerce.service.js';
+import { findCommerceByDpi, findCommerceDocumentsByDpi } from '../src/services/commerce.service.js';
 
 test('concurrent commerce lookups keep their DPI parameters in separate requests', async (t) => {
   const queries = [];
@@ -45,6 +45,28 @@ test('returns null when the commerce is not found', async () => {
   };
   const database = { getPool: async () => ({ request: () => request }) };
   assert.equal(await findCommerceByDpi('0123456789012', { database }), null);
+});
+
+test('queries every document and its commerce department using the requested DPI', async (t) => {
+  const rows = [
+    { NOMNEG: 'Comercio', DEPNEG: 7, DPI: '0123456789012', LATITUD: 14.6, LONGITUD: -90.5 },
+    { NOMNEG: 'Comercio', DEPNEG: 7, DPI: '0123456789012', LATITUD: 14.7, LONGITUD: -90.6 }
+  ];
+  let queryText;
+  const request = {
+    input() { return this; },
+    async query(text) {
+      queryText = text;
+      return { recordset: rows };
+    }
+  };
+  const database = { getPool: async () => ({ request: () => request }) };
+
+  assert.deepEqual(await findCommerceDocumentsByDpi('0123456789012', { database, linkedServer: 'GEPROD' }), rows);
+  assert.match(queryText, /FROM GENESIS\.LBALIANZAS\.DOCUMENTOS A/);
+  assert.match(queryText, /INNER JOIN GENESIS\.LBALIANZAS\.INFONEG B ON A\.IDINFONEG = B\.ID/);
+  assert.match(queryText, /A\.LATITUD, A\.LONGITUD/);
+  assert.ok(!queryText.includes('FETCH FIRST'));
 });
 
 test('rejects invalid DPI values before accessing SQL Server', async (t) => {
